@@ -6,9 +6,13 @@ def sigmoid(x):
 
 class LSTM():
     def __init__(self,X_t,n_neurons):
-        self.T         = max(X_t.shape)
+        self.T         = max(X_t.shape) # no of inputs 
         self.X_t       = X_t
         self.n_neurons=n_neurons
+        
+        # Inital predictiona al many values
+        self.Y_hat     = np.zeros((self.T, 1))
+        
         
         # Forget Gate
         
@@ -36,6 +40,12 @@ class LSTM():
         
         
         
+        self.H         = [np.zeros((self.n_neurons,1)) for t in range(self.T+1)]
+        
+         # Regression layer weights (for 1-to-1 regression)
+        self.Wy = np.random.randn(1, n_neurons)  # From n_neurons to 1 output
+        self.by = np.random.randn(1, 1)
+        
         
     def forward(self,x_t,h_t_1,c_t_1):
         xf = np.concatenate([h_t_1,x_t],axis=0)
@@ -59,8 +69,5 @@ class LSTM():
         ot = sigmoid(np.dot(self.Wo,xf)+self.bo) # 
         ht = ot*np.tanh(C_t)
         
-        return ht,C_t
-        
-        
-        
-        
+        out =  y_t = np.dot(self.Wy, ht) + self.by  # Project h_t to a single scalar
+        return ht,C_t,out
