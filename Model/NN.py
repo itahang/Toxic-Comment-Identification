@@ -3,66 +3,56 @@ from jax import numpy as jnp
 from jax import jit,grad 
 from functools import partial
 import functools
+from jax import random
 
 
-class LSTM():
+import jax
+import jax.numpy as jnp
+from jax import jit
+
+class LSTM:
     def __init__(self, input_size: int, hidden_size: int, rng):
         """
         Constructor for the LSTM class.
         -------------------------------
         Parameters:
-        input_size (int): The number of input features.
-        hidden_size (int): The number of units in the hidden state.
-        rng (jax.random.PRNGKey): Random number generator key.
+          input_size (int): The number of input features.
+          hidden_size (int): The number of units in the hidden state.
+          rng (jax.random.PRNGKey): Random number generator key.
         """
         self.input_size = input_size
         self.hidden_size = hidden_size
         
-        # Properly handle random key splitting
-        keys = jax.random.split(rng, 13)  # Split into 13 keys for all parameters
+        # Split key into 13 for all parameters
+        keys = jax.random.split(rng, 13)
         
-        # Initialize weights and biases for input gate
-        self.Wii = jax.random.normal(keys[0], ( hidden_size,input_size)) * 0.01
-        self.Whi = jax.random.normal(keys[1], (hidden_size, hidden_size)) * 0.01
-        self.bi = jax.random.normal(keys[2], (hidden_size,)) * 0.01
+        # Input gate weights and bias
+        self.Wii = jax.nn.initializers.orthogonal()(keys[0], (hidden_size, input_size))*2.0
+        self.Whi = jax.nn.initializers.orthogonal()(keys[1], (hidden_size, hidden_size))*2.0
+        self.bi  = jnp.ones((hidden_size, 1))*2.0  # or use an initializer if preferred
         
-        # Initialize weights and biases for forget gate
-        self.Wif = jax.random.normal(keys[3], (hidden_size,input_size )) * 0.01
-        self.Whf = jax.random.normal(keys[4], (hidden_size, hidden_size)) * 0.01
-        self.bf = jax.random.normal(keys[5], (hidden_size,)) * 0.01
+        # Forget gate weights and bias
+        self.Wif = jax.nn.initializers.orthogonal()(keys[3], (hidden_size, input_size))*2.0
+        self.Whf = jax.nn.initializers.orthogonal()(keys[4], (hidden_size, hidden_size))*2.0
+        self.bf  = jnp.ones((hidden_size, 1))*2.0
         
-        # Initialize weights and biases for cell gate
-        self.Wig = jax.random.normal(keys[6], ( hidden_size,input_size)) * 0.01
-        self.Whg = jax.random.normal(keys[7], (hidden_size, hidden_size)) * 0.01
-        self.bg = jax.random.normal(keys[8], (hidden_size,)) * 0.01
+        # Cell gate weights and bias
+        self.Wig = jax.nn.initializers.orthogonal()(keys[6], (hidden_size, input_size))*2.0
+        self.Whg = jax.nn.initializers.orthogonal()(keys[7], (hidden_size, hidden_size))*2.0
+        self.bg  = jnp.ones((hidden_size, 1))*2.0
         
-        # Initialize weights and biases for output gate
-        self.Wio = jax.random.normal(keys[9], ( hidden_size,input_size)) * 0.01
-        self.Who = jax.random.normal(keys[10], (hidden_size, hidden_size)) * 0.01
-        self.bo = jax.random.normal(keys[11], (hidden_size,)) * 0.01
+        # Output gate weights and bias
+        self.Wio = jax.nn.initializers.orthogonal()(keys[9], (hidden_size, input_size))*2.0
+        self.Who = jax.nn.initializers.orthogonal()(keys[10], (hidden_size, hidden_size))*2.0
+        self.bo  = jnp.ones((hidden_size, 1))*2.0
         
-        # Initialize default states (though these should typically be passed in)
-        self.h_0 = jnp.zeros((hidden_size,1))
-        self.c_0 = jnp.zeros((hidden_size,1))
+        # Initial states
+        self.h_0 = jnp.zeros((hidden_size, 1))
+        self.c_0 = jnp.zeros((hidden_size, 1))
+    
     def params(self):
         """
         Return the parameters of the LSTM as a dictionary.
-        
-        Returns:
-            dict: A dictionary containing the weights and biases of the LSTM.
-                  Keys are:
-                    - 'Wii': Weight matrix for input gate (input to hidden)
-                    - 'Whi': Weight matrix for input gate (hidden to hidden)
-                    - 'bi': Bias vector for input gate
-                    - 'Wif': Weight matrix for forget gate (input to hidden)
-                    - 'Whf': Weight matrix for forget gate (hidden to hidden)
-                    - 'bf': Bias vector for forget gate
-                    - 'Wig': Weight matrix for cell gate (input to hidden)
-                    - 'Whg': Weight matrix for cell gate (hidden to hidden)
-                    - 'bg': Bias vector for cell gate
-                    - 'Wio': Weight matrix for output gate (input to hidden)
-                    - 'Who': Weight matrix for output gate (hidden to hidden)
-                    - 'bo': Bias vector for output gate
         """
         return {
             'Wii': self.Wii, 'Whi': self.Whi, 'bi': self.bi,
@@ -75,18 +65,18 @@ class LSTM():
     @jit
     def forward(params, x_t, c_t, h_t):
         """
-        Perform Single Timestamp Forward pass
+        Single time-step forward pass.
         Args:
-            params (dict): Paramater of the LSTM
-            x_t ((input_size,1)): Input at time `t`
-            c_t ((hidden_size,1)): Long Term Memory 
-            h_t ((hidden_size,1)): Short Term Memory
-
+            params (dict): LSTM parameters.
+            x_t ((input_size,) or (input_size,1)): Input at time t.
+            c_t ((hidden_size,1)): Previous cell state.
+            h_t ((hidden_size,1)): Previous hidden state.
         Returns:
-            c_t_new, h_t_new
+            (c_t_new, h_t_new)
         """
         X_t = x_t.reshape(-1, 1)
         
+        # Compute projections for each gate
         x_proj = {
             'i': params['Wii'] @ X_t,
             'f': params['Wif'] @ X_t,
@@ -101,54 +91,78 @@ class LSTM():
             'o': params['Who'] @ h_t
         }
         
-        i = jax.nn.sigmoid(x_proj['i'] + h_proj['i'] + params['bi'].reshape(-1, 1))
-        f = jax.nn.sigmoid(x_proj['f'] + h_proj['f'] + params['bf'].reshape(-1, 1))
-        g = jax.nn.tanh(x_proj['g'] + h_proj['g'] + params['bg'].reshape(-1, 1))
+        i = jax.nn.sigmoid(x_proj['i'] + h_proj['i'] + params['bi'])
+        f = jax.nn.sigmoid(x_proj['f'] + h_proj['f'] + params['bf'])
+        g = jax.nn.tanh(x_proj['g'] + h_proj['g'] + params['bg'])
+        o = jax.nn.sigmoid(x_proj['o'] + h_proj['o'] + params['bo'])
         
         c_t_new = f * c_t + i * g
-        
-        o = jax.nn.sigmoid(x_proj['o'] + h_proj['o'] + params['bo'].reshape(-1, 1))
         h_t_new = o * jax.nn.tanh(c_t_new)
         
         return c_t_new, h_t_new
-    forward.__doc__ = forward.__doc__
     
     @staticmethod
-    def FullforwardPass(params,x,c_0,h_0,forward):
+    def FullforwardPass(params, x, c_0, h_0, forward):
         """
-        Perform Forward pass for all inputs 
+        Full forward pass over a sequence using lax.scan.
         Args:
-            params (dict): Paramater of the LSTM
-            x_t ((input_size,1)): (batch,input_size,1)
-            c_t ((hidden_size,1)): Long Term Memory 
-            h_t ((hidden_size,1)): Short Term Memory
-            forward : forward function of the model
+            params (dict): LSTM parameters.
+            x (array): Sequence input of shape (seq_length, input_size) or (seq_length, input_size, 1).
+            c_0 ((hidden_size,1)): Initial cell state.
+            h_0 ((hidden_size,1)): Initial hidden state.
+            forward: The single time-step forward function.
         Returns:
-            (c_t,h_t),h_t
+            final_carry, outputs  where final_carry = (c_final, h_final)
         """
-        def f(carry,x):
-            c_t,h_t = carry
-            c_t,h_t= forward(params,x,c_t,h_t)
-            return (c_t,h_t),h_t
-        return jax.lax.scan(f,(c_0,h_0),x)
+        def f(carry, x_t):
+            c_t, h_t = carry
+            c_t, h_t = forward(params, x_t, c_t, h_t)
+            return (c_t, h_t), h_t
+        
+        return jax.lax.scan(f, (c_0, h_0), x)
     
-    @partial(jit,static_argnums=(4))
-    def forwardPass(params,x,c_0,h_0,forward):
+    @staticmethod
+    @jit
+    def forwardPass(params, x, c_0, h_0, forward):
         """
-        Perform Forward pass for all inputs 
+        Forward pass for all time steps, returning the final hidden state.
         Args:
-            params (dict): Paramater of the LSTM
-            x_t ((input_size,1)): (batch,input_size,1)
-            c_t ((hidden_size,1)): Long Term Memory 
-            h_t ((hidden_size,1)): Short Term Memory
-            forward : forward function of the model
+            params (dict): LSTM parameters.
+            x (array): Sequence input of shape (seq_length, input_size) or similar.
+            c_0 ((hidden_size,1)): Initial cell state.
+            h_0 ((hidden_size,1)): Initial hidden state.
+            forward: The single time-step forward function.
         Returns:
-            h_t[-1] : Last output of the forward pass
-        """   
-        (_,_),f = LSTM.FullforwardPass(params,x,c_0,h_0,forward)
-        return f[-1]
-    forwardPass.__doc__=forwardPass.__doc__
+            h_final: The final hidden state.
+        """
+        (final_c, final_h), _ = LSTM.FullforwardPass(params, x, c_0, h_0, forward)
+        return final_h
+
+class BiDirectionalLSTM:
+    def __init__(self,input_size: int, hidden_size: int, rng):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        
+        # Split key into 13 for all parameters
+        keys = jax.random.split(rng, 2)
+        self.forwardLSTM = LSTM(input_size,hidden_size,keys[0])
+        self.reverseLSTM = LSTM(input_size,hidden_size,keys[1])
     
+    def params(self):
+        return self.forwardLSTM.params(),self.reverseLSTM.params()
+    
+    def forwards(self):
+        return self.forwardLSTM.FullforwardPass,self.reverseLSTM.FullforwardPass
+        
+    @staticmethod
+    @jit
+    def forward(params,x,c_0,h_0):
+        forwardParams,reverseParams = params 
+        (_,_),forwardX=LSTM.FullforwardPass(forwardParams,x,c_0,h_0,LSTM.forward)
+        (_,_),reverseX=LSTM.FullforwardPass(reverseParams,x[-1::-1,:],c_0,h_0,LSTM.forward)
+        Xs=jnp.array([jnp.concat([forwardX[i,:],reverseX[i,:]],axis=1).reshape(-1,1) for i in range(x.shape[0])])
+        return Xs
+
 class MLP:
     def __init__(self,numinputs,numOuts,rng):
         self.numinputs=numinputs
@@ -167,3 +181,26 @@ class MLP:
     def forward(params,x):
         x =x.reshape(-1,1)
         return params['W']@x + params['b'] 
+
+
+
+class Dropout:
+    def __init__(self, rate,rng=10):
+        assert 0 < rate < 1.0, "Dropout rate should be between 0 and 1"
+        self.rate = rate
+        self.rng = rng
+        self.key = random.PRNGKey(rng)
+    
+    def __call__(self, layer):
+        """
+        Layer should be a 1D or 2D numpy array.
+        Applies dropout by setting a fraction of activations to zero.
+        """
+        assert len(layer.shape) in [1, 2], "Layer should be a 1D or 2D numpy array."
+        mask=random.binomial(self.key,1,1-self.rate,shape=layer.shape)
+        _,key=random.split(self.key)
+        return layer * mask /(1-self.rate)
+def maxPooling(inputs:jnp.array):
+    return jnp.max(inputs,axis=0)
+
+    
